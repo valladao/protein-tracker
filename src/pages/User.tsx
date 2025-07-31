@@ -10,7 +10,7 @@ type Food = {
 
 type Entry = {
   foodId: string
-  times: number
+  timestamp: number
 }
 
 export default function User() {
@@ -22,6 +22,9 @@ export default function User() {
 
   const [newFoodName, setNewFoodName] = useState('')
   const [newFoodProtein, setNewFoodProtein] = useState('')
+  const [selectedFoodId, setSelectedFoodId] = useState('')
+
+  const today = new Date().toISOString().slice(0, 10)
 
   useEffect(() => {
     if (!nick) return
@@ -35,17 +38,20 @@ export default function User() {
       if (snapshot.exists()) setFoods(snapshot.val())
     })
 
-    const today = new Date().toISOString().slice(0, 10)
     get(child(userRef, `entries/${today}`)).then(snapshot => {
-      if (snapshot.exists()) setEntries(snapshot.val())
+      if (snapshot.exists()) {
+        const val = snapshot.val()
+        const entriesArray = Object.values(val) as Entry[]
+        setEntries(entriesArray)
+      }
     })
-  }, [nick])
+  }, [nick, today])
 
   useEffect(() => {
     let total = 0
     for (const entry of entries) {
       const food = foods[entry.foodId]
-      if (food) total += food.protein * entry.times
+      if (food) total += food.protein
     }
     setTotal(total)
   }, [entries, foods])
@@ -62,9 +68,27 @@ export default function User() {
     setNewFoodName('')
     setNewFoodProtein('')
 
-    // Reload foods
     const snapshot = await get(foodRef)
     if (snapshot.exists()) setFoods(snapshot.val())
+  }
+
+  const handleAddEntry = async () => {
+    if (!nick || !selectedFoodId) return
+
+    const entryRef = ref(db, `users/${nick}/entries/${today}`)
+    await push(entryRef, {
+      foodId: selectedFoodId,
+      timestamp: Date.now(),
+    })
+
+    const snapshot = await get(entryRef)
+    if (snapshot.exists()) {
+      const val = snapshot.val()
+      const entriesArray = Object.values(val) as Entry[]
+      setEntries(entriesArray)
+    }
+
+    setSelectedFoodId('')
   }
 
   return (
@@ -77,7 +101,8 @@ export default function User() {
       <ul className="mb-6">
         {entries.map((entry, index) => (
           <li key={index} className="text-sm">
-            {entry.times}x {foods[entry.foodId]?.name} ({foods[entry.foodId]?.protein * entry.times}g)
+            {foods[entry.foodId]?.name} - {foods[entry.foodId]?.protein}g
+            {' (' + new Date(entry.timestamp).toLocaleTimeString() + ')'}
           </li>
         ))}
       </ul>
@@ -91,7 +116,7 @@ export default function User() {
         ))}
       </ul>
 
-      <div className="flex gap-2">
+      <div className="flex gap-2 mb-4">
         <input
           className="border p-2 rounded"
           placeholder="Food name"
@@ -110,6 +135,25 @@ export default function User() {
           onClick={handleAddFood}
         >
           Add
+        </button>
+      </div>
+
+      <div className="flex gap-2 items-center">
+        <select
+          className="border p-2 rounded"
+          value={selectedFoodId}
+          onChange={(e) => setSelectedFoodId(e.target.value)}
+        >
+          <option value="">Select food</option>
+          {Object.entries(foods).map(([id, food]) => (
+            <option key={id} value={id}>{food.name}</option>
+          ))}
+        </select>
+        <button
+          className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
+          onClick={handleAddEntry}
+        >
+          Register
         </button>
       </div>
     </div>
