@@ -1,8 +1,7 @@
-// src/pages/User.tsx
 import { useParams } from 'react-router'
 import { useEffect, useState } from 'react'
 import { db } from '../lib/firebase'
-import { ref, get, child } from 'firebase/database'
+import { ref, get, child, push } from 'firebase/database'
 
 type Food = {
   name: string
@@ -20,6 +19,9 @@ export default function User() {
   const [foods, setFoods] = useState<Record<string, Food>>({})
   const [entries, setEntries] = useState<Entry[]>([])
   const [total, setTotal] = useState<number>(0)
+
+  const [newFoodName, setNewFoodName] = useState('')
+  const [newFoodProtein, setNewFoodProtein] = useState('')
 
   useEffect(() => {
     if (!nick) return
@@ -48,6 +50,23 @@ export default function User() {
     setTotal(total)
   }, [entries, foods])
 
+  const handleAddFood = async () => {
+    if (!nick || !newFoodName || !newFoodProtein) return
+
+    const foodRef = ref(db, `users/${nick}/foods`)
+    await push(foodRef, {
+      name: newFoodName,
+      protein: parseFloat(newFoodProtein),
+    })
+
+    setNewFoodName('')
+    setNewFoodProtein('')
+
+    // Reload foods
+    const snapshot = await get(foodRef)
+    if (snapshot.exists()) setFoods(snapshot.val())
+  }
+
   return (
     <div className="min-h-screen bg-white p-6">
       <h1 className="text-xl font-bold mb-4">Hello, {nick}</h1>
@@ -64,13 +83,35 @@ export default function User() {
       </ul>
 
       <h2 className="font-semibold mb-2">Your foods</h2>
-      <ul>
+      <ul className="mb-4">
         {Object.entries(foods).map(([id, food]) => (
           <li key={id} className="text-sm">
             {food.name}: {food.protein}g per unit
           </li>
         ))}
       </ul>
+
+      <div className="flex gap-2">
+        <input
+          className="border p-2 rounded"
+          placeholder="Food name"
+          value={newFoodName}
+          onChange={(e) => setNewFoodName(e.target.value)}
+        />
+        <input
+          className="border p-2 rounded w-32"
+          placeholder="Protein (g)"
+          type="number"
+          value={newFoodProtein}
+          onChange={(e) => setNewFoodProtein(e.target.value)}
+        />
+        <button
+          className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700"
+          onClick={handleAddFood}
+        >
+          Add
+        </button>
+      </div>
     </div>
   )
 }
