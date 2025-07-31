@@ -1,12 +1,13 @@
 import { useParams } from 'react-router'
 import { useEffect, useState } from 'react'
 import { db } from '../lib/firebase'
-import { ref, get, child, push } from 'firebase/database'
+import { ref, get, child, push, remove } from 'firebase/database'
 
 interface Entry {
   name: string
   protein: number
   timestamp: number
+  id?: string
 }
 
 interface Food {
@@ -16,7 +17,7 @@ interface Food {
 
 export default function User() {
   const { nick } = useParams<{ nick: string }>()
-  const [meta, setMeta] = useState<number>(0)
+  const [meta, setMeta] = useState<number | null>(null)
   const [entries, setEntries] = useState<Entry[]>([])
   const [foods, setFoods] = useState<Record<string, Food>>({})
   const [name, setName] = useState('')
@@ -35,7 +36,10 @@ export default function User() {
     get(child(userRef, `entries/${today}`)).then(snapshot => {
       if (snapshot.exists()) {
         const val = snapshot.val()
-        const list = Object.values(val) as Entry[]
+        const list = Object.entries(val).map(([id, data]) => {
+          const entry = data as Omit<Entry, 'id'>
+          return { ...entry, id }
+        })
         const sorted = list.sort((a, b) => b.timestamp - a.timestamp)
         setEntries(sorted)
       }
@@ -47,70 +51,99 @@ export default function User() {
   }, [nick, today])
 
   const total = entries.reduce((sum, e) => sum + e.protein, 0)
+  const percent = meta ? Math.round((total / meta) * 100) : 0
+
+  const refreshEntries = async () => {
+    const snapshot = await get(ref(db, `users/${nick}/entries/${today}`))
+    if (snapshot.exists()) {
+      const val = snapshot.val()
+      const list = Object.entries(val).map(([id, data]) => {
+        const entry = data as Omit<Entry, 'id'>
+        return { ...entry, id }
+      })
+      const sorted = list.sort((a, b) => b.timestamp - a.timestamp)
+      setEntries(sorted)
+    } else {
+      setEntries([])
+    }
+  }
 
   const handleAddEntry = async () => {
     if (!nick || !name || !protein) return
 
-    const entry: Entry = {
+    const entry = {
       name,
       protein: parseFloat(protein),
       timestamp: Date.now(),
     }
 
-    const entryRef = ref(db, `users/${nick}/entries/${today}`)
-    await push(entryRef, entry)
-
+    await push(ref(db, `users/${nick}/entries/${today}`), entry)
     setName('')
     setProtein('')
-
-    const snapshot = await get(entryRef)
-    if (snapshot.exists()) {
-      const val = snapshot.val()
-      const list = Object.values(val) as Entry[]
-      const sorted = list.sort((a, b) => b.timestamp - a.timestamp)
-      setEntries(sorted)
-    }
+    refreshEntries()
   }
 
   const handleFavorite = async (entry: Entry) => {
     if (!nick) return
-    const foodRef = ref(db, `users/${nick}/foods`)
-    await push(foodRef, {
+    await push(ref(db, `users/${nick}/foods`), {
       name: entry.name,
       protein: entry.protein,
     })
-    const snapshot = await get(foodRef)
+    const snapshot = await get(ref(db, `users/${nick}/foods`))
     if (snapshot.exists()) setFoods(snapshot.val())
   }
 
   const handleQuickAdd = async (foodId: string) => {
     const food = foods[foodId]
     if (!food || !nick) return
-
-    const entryRef = ref(db, `users/${nick}/entries/${today}`)
-    await push(entryRef, {
+    await push(ref(db, `users/${nick}/entries/${today}`), {
       name: food.name,
       protein: food.protein,
       timestamp: Date.now(),
     })
+    refreshEntries()
+  }
 
-    const snapshot = await get(entryRef)
-    if (snapshot.exists()) {
-      const val = snapshot.val()
-      const list = Object.values(val) as Entry[]
-      const sorted = list.sort((a, b) => b.timestamp - a.timestamp)
-      setEntries(sorted)
-    }
+  const handleDeleteEntry = async (id: string) => {
+    if (!nick || !id) return
+    await remove(ref(db, `users/${nick}/entries/${today}/${id}`))
+    refreshEntries()
+  }
+
+  const handleDeleteFood = async (id: string) => {
+    if (!nick || !id) return
+    await remove(ref(db, `users/${nick}/foods/${id}`))
+    const snapshot = await get(ref(db, `users/${nick}/foods`))
+    if (snapshot.exists()) setFoods(snapshot.val())
+    else setFoods({})
   }
 
   return (
     <div className="p-4">
       <h1 className="text-xl font-bold">Hello, {nick}</h1>
-      <p className="mb-2">Daily goal: {meta}g</p>
-      <p className="mb-4">Consumed today: {total}g ({Math.round((total / meta) * 100)}%)</p>
+      <p className="mb-2">Daily goal: {meta ?? '-'}g</p>
+      <p className="mb-4">Consumed today: {total}g ({percent}%)</p>
+
+      <h2 className="font-semibold mb-2">Favorite Foods</h2>
+      <ul className="mb-4">
+        {Object.entries(foods).reverse().map(([id, f]) => (
+          <li key={id} className="text-sm flex items-center justify-between">
+            <span>{f.name}: {f.protein}g</span>
+            <div className="flex gap-2">
+              <button
+                className="bg-blue-600 text-white px-2 py-1 text-xs rounded hover:bg-blue-700"
+                onClick={() => handleQuickAdd(id)}
+              >Add</button>
+              <button
+                className="text-red-500 hover:text-red-600 text-xs"
+                onClick={() => handleDeleteFood(id)}
+              >✕</button>
+            </div>
+          </li>
+        ))}
+      </ul>
 
       <h2 className="font-semibold mb-2">Add New Entry</h2>
-
       <div className="flex gap-2">
         <input
           className="border p-2 rounded"
@@ -134,29 +167,22 @@ export default function User() {
       </div>
 
       <h2 className="font-semibold mb-2">Today Entries</h2>
-
       <ul className="mb-4">
-        {entries.map((e, i) => (
-          <li key={i} className="text-sm flex items-center justify-between">
+        {entries.map((e) => (
+          <li key={e.timestamp} className="text-sm flex items-center justify-between">
             <span>{e.name} - {e.protein}g ({new Date(e.timestamp).toLocaleTimeString()})</span>
-            <button
-              className="text-yellow-500 hover:text-yellow-600 ml-2"
-              onClick={() => handleFavorite(e)}
-              title="Add to favorites"
-            >★</button>
-          </li>
-        ))}
-      </ul>
-
-      <h2 className="font-semibold mb-2">Favorite Foods</h2>
-      <ul className="mb-4">
-        {Object.entries(foods).reverse().map(([id, f]) => (
-          <li key={id} className="text-sm flex items-center justify-between">
-            <span>{f.name}: {f.protein}g</span>
-            <button
-              className="bg-blue-600 text-white px-2 py-1 text-xs rounded hover:bg-blue-700"
-              onClick={() => handleQuickAdd(id)}
-            >Add</button>
+            <div className="flex gap-2">
+              <button
+                className="text-yellow-500 hover:text-yellow-600"
+                onClick={() => handleFavorite(e)}
+                title="Add to favorites"
+              >★</button>
+              <button
+                className="text-red-500 hover:text-red-600"
+                onClick={() => handleDeleteEntry(e.id!)}
+                title="Delete entry"
+              >✕</button>
+            </div>
           </li>
         ))}
       </ul>
