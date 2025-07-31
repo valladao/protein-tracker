@@ -22,6 +22,9 @@ export default function User() {
   const [foods, setFoods] = useState<Record<string, Food>>({})
   const [name, setName] = useState('')
   const [protein, setProtein] = useState('')
+  const [history, setHistory] = useState<
+    { date: string; total: number; percent: number }[]
+  >([])
 
   const today = new Date().toISOString().slice(0, 10)
 
@@ -48,7 +51,42 @@ export default function User() {
     get(child(userRef, 'foods')).then(snapshot => {
       if (snapshot.exists()) setFoods(snapshot.val())
     })
-  }, [nick, today])
+  }, [nick, today, meta])
+
+  useEffect(() => {
+    if (!nick) return
+
+    const getHistory = async () => {
+      const promises = []
+      const days = [...Array(5).keys()].map(i => {
+        const d = new Date()
+        d.setDate(d.getDate() - (i + 1))
+        return d.toISOString().slice(0, 10)
+      })
+
+      for (const day of days) {
+        const p = get(ref(db, `users/${nick}/entries/${day}`)).then(snap => {
+          let total = 0
+          if (snap.exists()) {
+            const val = snap.val()
+            const values = Object.values(val) as { protein: number }[]
+            total = values.reduce((sum, e) => sum + e.protein, 0)
+          }
+          return {
+            date: day.slice(5),
+            total,
+            percent: meta ? Math.round((total / meta) * 100) : 0
+          }
+        })
+        promises.push(p)
+      }
+
+      const results = await Promise.all(promises)
+      setHistory(results)
+    }
+
+    getHistory()
+  }, [nick, meta])
 
   const total = entries.reduce((sum, e) => sum + e.protein, 0)
   const percent = meta ? Math.round((total / meta) * 100) : 0
@@ -193,6 +231,16 @@ export default function User() {
                 title="Delete entry"
               >✕</button>
             </div>
+          </li>
+        ))}
+      </ul>
+
+      <h2 className="font-semibold mt-6 mb-2">Last Days</h2>
+      <ul className="text-sm space-y-1">
+        {history.map((h) => (
+          <li key={h.date} className="flex justify-between">
+            <span>{h.date}</span>
+            <span>{h.total}g ({h.percent}%)</span>
           </li>
         ))}
       </ul>
