@@ -124,6 +124,16 @@ export default function User() {
       <p className="mb-2">Daily goal: {meta ?? '-'}g</p>
       <p className="mb-4">Consumed today: {total}g ({percent}%)</p>
 
+      <div className="w-full h-6 bg-gray-200 rounded-full mb-4 overflow-hidden">
+        <div
+          className={`h-full text-sm font-semibold text-center text-white transition-all duration-300 ${percent >= 100 ? 'bg-green-600' : 'bg-blue-500'
+            }`}
+          style={{ width: `${Math.min(percent, 100)}%` }}
+        >
+          {percent}%
+        </div>
+      </div>
+
       <h2 className="font-semibold mb-2">Favorite Foods</h2>
       <ul className="mb-4">
         {Object.entries(foods).reverse().map(([id, f]) => (
