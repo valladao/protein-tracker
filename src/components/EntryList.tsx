@@ -1,3 +1,5 @@
+import IconButton from "./IconButton"
+
 interface Entry {
   id: string
   name: string
@@ -24,19 +26,9 @@ export default function EntryList({ entries }: EntryListProps) {
                 {entry.protein}g - {new Date(entry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
               </p>
             </div>
-            <div className="space-x-2">
-              <button
-                onClick={() => entry.onFavorite(entry.id)}
-                className="text-yellow-500 text-sm"
-              >
-                ★
-              </button>
-              <button
-                onClick={() => entry.onDelete(entry.id)}
-                className="text-red-500 text-sm"
-              >
-                ✕
-              </button>
+            <div className="space-x-2 flex">
+              <IconButton variant="favorite" onClick={() => entry.onFavorite(entry.id)} />
+              <IconButton variant="delete" onClick={() => entry.onDelete(entry.id)} />
             </div>
           </li>
         ))}

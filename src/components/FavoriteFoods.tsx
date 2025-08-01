@@ -1,3 +1,5 @@
+import IconButton from "./IconButton"
+
 interface FavoriteFood {
   id: string
   name: string
@@ -18,19 +20,9 @@ export default function FavoriteFoods({ foods }: FavoriteFoodsProps) {
         {foods.map(food => (
           <li key={food.id} className="flex items-center justify-between bg-gray-50 px-3 py-1 rounded">
             <span>{food.name}: {food.protein}g</span>
-            <div className="space-x-2">
-              <button
-                onClick={() => food.onAdd(food.id)}
-                className="bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded text-sm"
-              >
-                Add
-              </button>
-              <button
-                onClick={() => food.onDelete(food.id)}
-                className="text-red-500 text-sm"
-              >
-                ✕
-              </button>
+            <div className="space-x-2 flex">
+              <IconButton variant="add" onClick={() => food.onAdd(food.id)} />
+              <IconButton variant="delete" onClick={() => food.onDelete(food.id)} />
             </div>
           </li>
         ))}
