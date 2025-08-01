@@ -1,250 +1,153 @@
-import { useParams } from 'react-router'
 import { useEffect, useState } from 'react'
+import { useParams } from 'react-router'
 import { db } from '../lib/firebase'
-import { ref, get, child, push, remove } from 'firebase/database'
+import {
+  ref,
+  onValue,
+  push,
+  remove,
+  get,
+} from 'firebase/database'
+import Header from '../components/Header'
+import ProgressBar from '../components/ProgressBar'
+import FavoriteFoods from '../components/FavoriteFoods'
+import EntryForm from '../components/EntryForm'
+import EntryList from '../components/EntryList'
+import HistoryList from '../components/HistoryList'
 
 interface Entry {
+  id: string
   name: string
   protein: number
   timestamp: number
-  id?: string
 }
 
 interface Food {
+  id: string
   name: string
   protein: number
 }
 
 export default function User() {
-  const { nick } = useParams<{ nick: string }>()
-  const [meta, setMeta] = useState<number | null>(null)
+  const { nick } = useParams()
   const [entries, setEntries] = useState<Entry[]>([])
-  const [foods, setFoods] = useState<Record<string, Food>>({})
-  const [name, setName] = useState('')
-  const [protein, setProtein] = useState('')
-  const [history, setHistory] = useState<
-    { date: string; total: number; percent: number }[]
-  >([])
-
-  const today = new Date().toISOString().slice(0, 10)
-
-  useEffect(() => {
-    if (!nick) return
-
-    const userRef = ref(db, `users/${nick}`)
-    get(child(userRef, 'meta')).then(snapshot => {
-      if (snapshot.exists()) setMeta(snapshot.val())
-    })
-
-    get(child(userRef, `entries/${today}`)).then(snapshot => {
-      if (snapshot.exists()) {
-        const val = snapshot.val()
-        const list = Object.entries(val).map(([id, data]) => {
-          const entry = data as Omit<Entry, 'id'>
-          return { ...entry, id }
-        })
-        const sorted = list.sort((a, b) => b.timestamp - a.timestamp)
-        setEntries(sorted)
-      }
-    })
-
-    get(child(userRef, 'foods')).then(snapshot => {
-      if (snapshot.exists()) setFoods(snapshot.val())
-    })
-  }, [nick, today, meta])
+  const [foods, setFoods] = useState<Food[]>([])
+  const [meta, setMeta] = useState<number | null>(null)
+  const [history, setHistory] = useState<{
+    date: string
+    total: number
+    percent: number
+  }[]>([])
 
   useEffect(() => {
     if (!nick) return
 
-    const getHistory = async () => {
-      const promises = []
-      const days = [...Array(5).keys()].map(i => {
-        const d = new Date()
-        d.setDate(d.getDate() - (i + 1))
-        return d.toISOString().slice(0, 10)
-      })
+    const entriesRef = ref(db, `users/${nick}/entries`)
+    const foodsRef = ref(db, `users/${nick}/foods`)
+    const metaRef = ref(db, `users/${nick}/meta`)
 
-      for (const day of days) {
-        const p = get(ref(db, `users/${nick}/entries/${day}`)).then(snap => {
-          let total = 0
-          if (snap.exists()) {
-            const val = snap.val()
-            const values = Object.values(val) as { protein: number }[]
-            total = values.reduce((sum, e) => sum + e.protein, 0)
-          }
+    const today = new Date().toISOString().split('T')[0]
+    const todayRef = ref(db, `users/${nick}/entries/${today}`)
+
+    onValue(todayRef, (snap) => {
+      const val = snap.val()
+      if (!val) return setEntries([])
+      const list = Object.entries(val as Record<string, Omit<Entry, 'id'>>).map(
+        ([id, data]) => ({ ...data, id })
+      )
+      list.sort((a, b) => b.timestamp - a.timestamp)
+      setEntries(list)
+    })
+
+    onValue(foodsRef, (snap) => {
+      const val = snap.val()
+      if (!val) return setFoods([])
+      const list = Object.entries(val as Record<string, Omit<Food, 'id'>>).map(
+        ([id, data]) => ({ ...data, id })
+      )
+      setFoods(list)
+    })
+
+    onValue(metaRef, (snap) => {
+      setMeta(Number(snap.val()) || null)
+    })
+
+    get(entriesRef).then((snap) => {
+      const val = snap.val()
+      if (!val) return
+      const result = Object.entries(val as Record<string, Record<string, { protein: number }>>)
+        .slice(-5)
+        .map(([date, items]) => {
+          const values = Object.values(items)
+          const total = values.reduce((sum, e) => sum + e.protein, 0)
           return {
-            date: day.slice(5),
+            date,
             total,
-            percent: meta ? Math.round((total / meta) * 100) : 0
+            percent: meta ? Math.round((total / meta) * 100) : 0,
           }
         })
-        promises.push(p)
-      }
-
-      const results = await Promise.all(promises)
-      setHistory(results)
-    }
-
-    getHistory()
+        .reverse()
+      setHistory(result)
+    })
   }, [nick, meta])
+
+  const todayKey = new Date().toISOString().split('T')[0]
+
+  const handleAddEntry = (name: string, protein: number) => {
+    if (!nick) return
+    const newEntry = {
+      name,
+      protein,
+      timestamp: Date.now(),
+    }
+    push(ref(db, `users/${nick}/entries/${todayKey}`), newEntry)
+  }
+
+  const handleFavorite = (id: string) => {
+    const entry = entries.find((e) => e.id === id)
+    if (!entry || !nick) return
+    const { name, protein } = entry
+    push(ref(db, `users/${nick}/foods`), { name, protein })
+  }
+
+  const handleAddFromFood = (id: string) => {
+    const food = foods.find((f) => f.id === id)
+    if (!food || !nick) return
+    const { name, protein } = food
+    push(ref(db, `users/${nick}/entries/${todayKey}`), {
+      name,
+      protein,
+      timestamp: Date.now(),
+    })
+  }
+
+  const handleDeleteFood = (id: string) => {
+    if (!nick) return
+    remove(ref(db, `users/${nick}/foods/${id}`))
+  }
+
+  const handleDeleteEntry = (id: string) => {
+    if (!nick) return
+    remove(ref(db, `users/${nick}/entries/${todayKey}/${id}`))
+  }
 
   const total = entries.reduce((sum, e) => sum + e.protein, 0)
   const percent = meta ? Math.round((total / meta) * 100) : 0
 
-  const refreshEntries = async () => {
-    const snapshot = await get(ref(db, `users/${nick}/entries/${today}`))
-    if (snapshot.exists()) {
-      const val = snapshot.val()
-      const list = Object.entries(val).map(([id, data]) => {
-        const entry = data as Omit<Entry, 'id'>
-        return { ...entry, id }
-      })
-      const sorted = list.sort((a, b) => b.timestamp - a.timestamp)
-      setEntries(sorted)
-    } else {
-      setEntries([])
-    }
-  }
-
-  const handleAddEntry = async () => {
-    if (!nick || !name || !protein) return
-
-    const entry = {
-      name,
-      protein: parseFloat(protein),
-      timestamp: Date.now(),
-    }
-
-    await push(ref(db, `users/${nick}/entries/${today}`), entry)
-    setName('')
-    setProtein('')
-    refreshEntries()
-  }
-
-  const handleFavorite = async (entry: Entry) => {
-    if (!nick) return
-    await push(ref(db, `users/${nick}/foods`), {
-      name: entry.name,
-      protein: entry.protein,
-    })
-    const snapshot = await get(ref(db, `users/${nick}/foods`))
-    if (snapshot.exists()) setFoods(snapshot.val())
-  }
-
-  const handleQuickAdd = async (foodId: string) => {
-    const food = foods[foodId]
-    if (!food || !nick) return
-    await push(ref(db, `users/${nick}/entries/${today}`), {
-      name: food.name,
-      protein: food.protein,
-      timestamp: Date.now(),
-    })
-    refreshEntries()
-  }
-
-  const handleDeleteEntry = async (id: string) => {
-    if (!nick || !id) return
-    await remove(ref(db, `users/${nick}/entries/${today}/${id}`))
-    refreshEntries()
-  }
-
-  const handleDeleteFood = async (id: string) => {
-    if (!nick || !id) return
-    await remove(ref(db, `users/${nick}/foods/${id}`))
-    const snapshot = await get(ref(db, `users/${nick}/foods`))
-    if (snapshot.exists()) setFoods(snapshot.val())
-    else setFoods({})
-  }
-
   return (
-    <div className="p-4">
-      <h1 className="text-xl font-bold">Hello, {nick}</h1>
-      <p className="mb-2">Daily goal: {meta ?? '-'}g</p>
-      <p className="mb-4">Consumed today: {total}g ({percent}%)</p>
-
-      <div className="w-full h-6 bg-gray-200 rounded-full mb-4 overflow-hidden">
-        <div
-          className={`h-full text-sm font-semibold text-center text-white transition-all duration-300 ${percent >= 100 ? 'bg-green-600' : 'bg-blue-500'
-            }`}
-          style={{ width: `${Math.min(percent, 100)}%` }}
-        >
-          {percent}%
-        </div>
-      </div>
-
-      <h2 className="font-semibold mb-2">Favorite Foods</h2>
-      <ul className="mb-4">
-        {Object.entries(foods).reverse().map(([id, f]) => (
-          <li key={id} className="text-sm flex items-center justify-between">
-            <span>{f.name}: {f.protein}g</span>
-            <div className="flex gap-2">
-              <button
-                className="bg-blue-600 text-white px-2 py-1 text-xs rounded hover:bg-blue-700"
-                onClick={() => handleQuickAdd(id)}
-              >Add</button>
-              <button
-                className="text-red-500 hover:text-red-600 text-xs"
-                onClick={() => handleDeleteFood(id)}
-              >✕</button>
-            </div>
-          </li>
-        ))}
-      </ul>
-
-      <h2 className="font-semibold mb-2">Add New Entry</h2>
-      <div className="flex gap-2">
-        <input
-          className="border p-2 rounded"
-          placeholder="Food name"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
+    <div className="min-h-screen bg-gray-100 flex items-center justify-center p-4">
+      <div className="bg-white shadow-lg rounded-xl p-6 w-full max-w-md">
+        <Header nick={nick ?? ''} meta={meta} total={total} percent={percent} />
+        <ProgressBar percent={percent} />
+        <EntryForm onAddEntry={handleAddEntry} />
+        <FavoriteFoods
+          foods={foods.map((f) => ({ ...f, onAdd: handleAddFromFood, onDelete: handleDeleteFood }))}
         />
-        <input
-          className="border p-2 rounded w-32"
-          placeholder="Protein (g)"
-          type="number"
-          value={protein}
-          onChange={(e) => setProtein(e.target.value)}
+        <EntryList
+          entries={entries.map((e) => ({ ...e, onFavorite: handleFavorite, onDelete: handleDeleteEntry }))}
         />
-        <button
-          className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700"
-          onClick={handleAddEntry}
-        >
-          Add
-        </button>
+        <HistoryList history={history} />
       </div>
-
-      <h2 className="font-semibold mb-2">Today Entries</h2>
-      <ul className="mb-4">
-        {entries.map((e) => (
-          <li key={e.timestamp} className="text-sm flex items-center justify-between">
-            <span>{e.name} - {e.protein}g ({new Date(e.timestamp).toLocaleTimeString()})</span>
-            <div className="flex gap-2">
-              <button
-                className="text-yellow-500 hover:text-yellow-600"
-                onClick={() => handleFavorite(e)}
-                title="Add to favorites"
-              >★</button>
-              <button
-                className="text-red-500 hover:text-red-600"
-                onClick={() => handleDeleteEntry(e.id!)}
-                title="Delete entry"
-              >✕</button>
-            </div>
-          </li>
-        ))}
-      </ul>
-
-      <h2 className="font-semibold mt-6 mb-2">Last Days</h2>
-      <ul className="text-sm space-y-1">
-        {history.map((h) => (
-          <li key={h.date} className="flex justify-between">
-            <span>{h.date}</span>
-            <span>{h.total}g ({h.percent}%)</span>
-          </li>
-        ))}
-      </ul>
-
     </div>
   )
 }
