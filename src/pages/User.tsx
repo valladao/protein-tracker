@@ -1,160 +1,152 @@
-import { useParams } from 'react-router'
 import { useEffect, useState } from 'react'
+import { useParams } from 'react-router'
 import { db } from '../lib/firebase'
-import { ref, get, child, push } from 'firebase/database'
+import {
+  ref,
+  onValue,
+  push,
+  remove,
+  get,
+} from 'firebase/database'
+import Header from '../components/Header'
+import ProgressBar from '../components/ProgressBar'
+import FavoriteFoods from '../components/FavoriteFoods'
+import EntryForm from '../components/EntryForm'
+import EntryList from '../components/EntryList'
+import HistoryList from '../components/HistoryList'
 
-type Food = {
+interface Entry {
+  id: string
+  name: string
+  protein: number
+  timestamp: number
+}
+
+interface Food {
+  id: string
   name: string
   protein: number
 }
 
-type Entry = {
-  foodId: string
-  timestamp: number
-}
-
 export default function User() {
-  const { nick } = useParams<{ nick: string }>()
-  const [meta, setMeta] = useState<number>(0)
-  const [foods, setFoods] = useState<Record<string, Food>>({})
+  const { nick } = useParams()
   const [entries, setEntries] = useState<Entry[]>([])
-  const [total, setTotal] = useState<number>(0)
-
-  const [newFoodName, setNewFoodName] = useState('')
-  const [newFoodProtein, setNewFoodProtein] = useState('')
-  const [selectedFoodId, setSelectedFoodId] = useState('')
-
-  const today = new Date().toISOString().slice(0, 10)
+  const [foods, setFoods] = useState<Food[]>([])
+  const [meta, setMeta] = useState<number | null>(null)
+  const [history, setHistory] = useState<{
+    date: string
+    total: number
+    percent: number
+  }[]>([])
 
   useEffect(() => {
     if (!nick) return
-    const userRef = ref(db, `users/${nick}`)
 
-    get(child(userRef, 'meta')).then(snapshot => {
-      if (snapshot.exists()) setMeta(snapshot.val())
+    const entriesRef = ref(db, `users/${nick}/entries`)
+    const foodsRef = ref(db, `users/${nick}/foods`)
+    const metaRef = ref(db, `users/${nick}/meta`)
+
+    const today = new Date().toISOString().split('T')[0]
+    const todayRef = ref(db, `users/${nick}/entries/${today}`)
+
+    onValue(todayRef, (snap) => {
+      const val = snap.val()
+      if (!val) return setEntries([])
+      const list = Object.entries(val as Record<string, Omit<Entry, 'id'>>).map(
+        ([id, data]) => ({ ...data, id })
+      )
+      list.sort((a, b) => b.timestamp - a.timestamp)
+      setEntries(list)
     })
 
-    get(child(userRef, 'foods')).then(snapshot => {
-      if (snapshot.exists()) setFoods(snapshot.val())
+    onValue(foodsRef, (snap) => {
+      const val = snap.val()
+      if (!val) return setFoods([])
+      const list = Object.entries(val as Record<string, Omit<Food, 'id'>>).map(
+        ([id, data]) => ({ ...data, id })
+      )
+      setFoods(list)
     })
 
-    get(child(userRef, `entries/${today}`)).then(snapshot => {
-      if (snapshot.exists()) {
-        const val = snapshot.val()
-        const entriesArray = Object.values(val) as Entry[]
-        setEntries(entriesArray)
-      }
+    onValue(metaRef, (snap) => {
+      setMeta(Number(snap.val()) || null)
     })
-  }, [nick, today])
 
-  useEffect(() => {
-    let total = 0
-    for (const entry of entries) {
-      const food = foods[entry.foodId]
-      if (food) total += food.protein
+    get(entriesRef).then((snap) => {
+      const val = snap.val()
+      if (!val) return
+      const result = Object.entries(val as Record<string, Record<string, { protein: number }>>)
+        .slice(-5)
+        .map(([date, items]) => {
+          const values = Object.values(items)
+          const total = values.reduce((sum, e) => sum + e.protein, 0)
+          return {
+            date,
+            total,
+            percent: meta ? Math.round((total / meta) * 100) : 0,
+          }
+        })
+        .reverse()
+      setHistory(result)
+    })
+  }, [nick, meta])
+
+  const todayKey = new Date().toISOString().split('T')[0]
+
+  const handleAddEntry = (name: string, protein: number) => {
+    if (!nick) return
+    const newEntry = {
+      name,
+      protein,
+      timestamp: Date.now(),
     }
-    setTotal(total)
-  }, [entries, foods])
-
-  const handleAddFood = async () => {
-    if (!nick || !newFoodName || !newFoodProtein) return
-
-    const foodRef = ref(db, `users/${nick}/foods`)
-    await push(foodRef, {
-      name: newFoodName,
-      protein: parseFloat(newFoodProtein),
-    })
-
-    setNewFoodName('')
-    setNewFoodProtein('')
-
-    const snapshot = await get(foodRef)
-    if (snapshot.exists()) setFoods(snapshot.val())
+    push(ref(db, `users/${nick}/entries/${todayKey}`), newEntry)
   }
 
-  const handleAddEntry = async () => {
-    if (!nick || !selectedFoodId) return
+  const handleFavorite = (id: string) => {
+    const entry = entries.find((e) => e.id === id)
+    if (!entry || !nick) return
+    const { name, protein } = entry
+    push(ref(db, `users/${nick}/foods`), { name, protein })
+  }
 
-    const entryRef = ref(db, `users/${nick}/entries/${today}`)
-    await push(entryRef, {
-      foodId: selectedFoodId,
+  const handleAddFromFood = (id: string) => {
+    const food = foods.find((f) => f.id === id)
+    if (!food || !nick) return
+    const { name, protein } = food
+    push(ref(db, `users/${nick}/entries/${todayKey}`), {
+      name,
+      protein,
       timestamp: Date.now(),
     })
-
-    const snapshot = await get(entryRef)
-    if (snapshot.exists()) {
-      const val = snapshot.val()
-      const entriesArray = Object.values(val) as Entry[]
-      setEntries(entriesArray)
-    }
-
-    setSelectedFoodId('')
   }
 
+  const handleDeleteFood = (id: string) => {
+    if (!nick) return
+    remove(ref(db, `users/${nick}/foods/${id}`))
+  }
+
+  const handleDeleteEntry = (id: string) => {
+    if (!nick) return
+    remove(ref(db, `users/${nick}/entries/${todayKey}/${id}`))
+  }
+
+  const total = entries.reduce((sum, e) => sum + e.protein, 0)
+  const percent = meta ? Math.round((total / meta) * 100) : 0
+
   return (
-    <div className="min-h-screen bg-white p-6">
-      <h1 className="text-xl font-bold mb-4">Hello, {nick}</h1>
-      <p className="mb-2">Daily goal: {meta}g</p>
-      <p className="mb-4">Consumed today: {total}g ({Math.round((total / meta) * 100)}%)</p>
-
-      <h2 className="font-semibold mb-2">Entries</h2>
-      <ul className="mb-6">
-        {entries.map((entry, index) => (
-          <li key={index} className="text-sm">
-            {foods[entry.foodId]?.name} - {foods[entry.foodId]?.protein}g
-            {' (' + new Date(entry.timestamp).toLocaleTimeString() + ')'}
-          </li>
-        ))}
-      </ul>
-
-      <h2 className="font-semibold mb-2">Your foods</h2>
-      <ul className="mb-4">
-        {Object.entries(foods).map(([id, food]) => (
-          <li key={id} className="text-sm">
-            {food.name}: {food.protein}g per unit
-          </li>
-        ))}
-      </ul>
-
-      <div className="flex gap-2 mb-4">
-        <input
-          className="border p-2 rounded"
-          placeholder="Food name"
-          value={newFoodName}
-          onChange={(e) => setNewFoodName(e.target.value)}
+    <div className="min-h-screen bg-gray-100 flex items-center justify-center p-4">
+      <div className="bg-white shadow-lg rounded-xl p-6 w-full max-w-md">
+        <Header nick={nick ?? ''} meta={meta} total={total} percent={percent} />
+        <ProgressBar percent={percent} />
+        <EntryForm onAddEntry={handleAddEntry} />
+        <FavoriteFoods
+          foods={foods.map((f) => ({ ...f, onAdd: handleAddFromFood, onDelete: handleDeleteFood }))}
         />
-        <input
-          className="border p-2 rounded w-32"
-          placeholder="Protein (g)"
-          type="number"
-          value={newFoodProtein}
-          onChange={(e) => setNewFoodProtein(e.target.value)}
+        <EntryList
+          entries={entries.map((e) => ({ ...e, onFavorite: handleFavorite, onDelete: handleDeleteEntry }))}
         />
-        <button
-          className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700"
-          onClick={handleAddFood}
-        >
-          Add
-        </button>
-      </div>
-
-      <div className="flex gap-2 items-center">
-        <select
-          className="border p-2 rounded"
-          value={selectedFoodId}
-          onChange={(e) => setSelectedFoodId(e.target.value)}
-        >
-          <option value="">Select food</option>
-          {Object.entries(foods).map(([id, food]) => (
-            <option key={id} value={id}>{food.name}</option>
-          ))}
-        </select>
-        <button
-          className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
-          onClick={handleAddEntry}
-        >
-          Register
-        </button>
+        <HistoryList history={history} />
       </div>
     </div>
   )
