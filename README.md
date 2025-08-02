@@ -1,11 +1,14 @@
 # Protein Tracker
 
 A minimalist, open-source web app to track your daily protein intake.
+
 **Live demo:** _coming soon_
+
 **Status:** In active use and open to contributions
+
 **Author:** [@valladao](https://github.com/valladao)
 
-![screenshot](./screenshot.png)
+<img width="785" height="804" alt="image" src="https://github.com/user-attachments/assets/1396a29a-b803-4ff7-ba1d-13b08c089d7b" />
 
 ---
 
@@ -133,8 +136,6 @@ To contribute:
 1. Fork the repo
 2. Create a branch
 3. Submit a PR with a clear description
-
----
 
 ## 🛠️ Future Ideas
 
