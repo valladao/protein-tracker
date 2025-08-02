@@ -1,5 +1,3 @@
-import './App.css'
-
 function App() {
   return (
     <div className="min-h-screen flex flex-col items-center justify-center gap-4 bg-gray-50 p-6">
